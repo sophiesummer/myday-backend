@@ -11,7 +11,7 @@ exports.createTask = async (req, res) => {
 	}
 };
 
-// Query all tasks
+// Query some tasks
 exports.queryTasks = async (req, res) => {
 	try {
 		// Parse the `q` parameter
