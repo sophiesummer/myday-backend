@@ -1,24 +1,35 @@
 const express = require('express');
 const {
 	createTask,
+	getUserTasks,
 	queryTasks,
 	getTaskById,
 	updateTaskById,
 	deleteTaskById
 } = require('../controllers/taskController');
+const { protect } = require('../middleware/auth');
 
 const router = express.Router();
 
+// All task routes are protected - require authentication
+router.use(protect);
+
+// Get all tasks for the authenticated user
+router.get('/user', getUserTasks);
+
+// Query tasks with filter (only shows authenticated user's tasks)
 router.get('/', queryTasks);
+
+// Get a specific task by ID (only if owned by authenticated user)
 router.get('/:id', getTaskById);
 
-// Create a new task
+// Create a new task (automatically assigned to authenticated user)
 router.post('/', createTask);
 
-// Update a task by ID
+// Update a task by ID (only if owned by authenticated user)
 router.put('/:id', updateTaskById);
 
-// Delete a task by ID
+// Delete a task by ID (only if owned by authenticated user)
 router.delete('/:id', deleteTaskById);
 
 module.exports = router;

@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require("cors");
 const connectDB = require('./app/config/db.js');
@@ -8,23 +9,27 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 var corsOptions = {
-	origin: "http://localhost:8080"
+	origin: process.env.CLIENT_URL || "http://localhost:8080"
 };
 
+// Connect to MongoDB
 connectDB();
 
+// CORS middleware
 app.use(cors(corsOptions));
 
-// Middleware
-// parse requests of content-type - application/json
+// Middleware for parsing request body
 app.use(express.json()); // To parse JSON payloads
-
-// parse requests of content-type - application/x-www-form-urlencoded
 app.use(express.urlencoded({ extended: true }));
 
+// API Routes
 app.use('/api/tasks', taskRoutes);
 app.use('/api/users', userRoutes);
 
+// Basic route for API health check
+app.get('/', (req, res) => {
+    res.json({ message: 'Welcome to the task management API' });
+});
 
 // Start Server
 app.listen(PORT, () => {
