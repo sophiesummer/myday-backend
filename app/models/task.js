@@ -11,11 +11,16 @@ const TaskSchema = new mongoose.Schema({
 	description: { type: String },
 	status: { type: String, enum: ['todo', 'in progress', 'pending', 'done'], default: 'todo' },
 	createdAt: { type: Number, default: () => Date.now() },
-	startTime: { type: Number },
+	startTime: { type: Number, default: () => Date.now() },
 	endTime: { type: Number },
 	priority: { type: Number, default: 1 },
 	recursion: { type: RecursionSchema, default: null },
 	userId: { type: String },
+	note: { type: String },
+	isBacklog: { type: Boolean, default: false },
+	skipped: { type: Boolean, default: false },
+	planPeriod: { type: String }, // e.g., '2025-W12' or '2025-03-23' for day
+	tag: { type: String },
 });
 
 module.exports = mongoose.model('Task', TaskSchema);
