@@ -1,5 +1,21 @@
 const admin = require('firebase-admin');
 const User = require('../models/user');
+const { AsyncLocalStorage } = require('async_hooks');
+
+// Create AsyncLocalStorage instance to store user context
+const userContextStorage = new AsyncLocalStorage();
+
+// Export the userContextStorage to be used in other files
+exports.userContextStorage = userContextStorage;
+
+// Helper function to get current user from context
+exports.getCurrentUser = () => {
+  const store = userContextStorage.getStore();
+  if (!store) {
+    throw new Error('No user context found. Make sure this is called within an authenticated route.');
+  }
+  return store.user;
+};
 
 // Initialize Firebase Admin SDK
 if (!admin.apps.length) {
@@ -83,10 +99,14 @@ exports.verifyFirebaseToken = async (req, res, next) => {
       await user.save();
     }
 
-    // Attach user to request
+    // Attach user to request (keeping for backward compatibility)
     req.user = user;
-    console.log('Auth successful, proceeding to next middleware');
-    next();
+    
+    // Run the next middleware within a user context
+    userContextStorage.run({ user }, () => {
+      console.log('Auth successful, proceeding to next middleware');
+      next();
+    });
   } catch (error) {
     console.error('Firebase authentication error:', error);
     return res.status(401).json({
