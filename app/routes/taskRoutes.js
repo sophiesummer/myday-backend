@@ -7,12 +7,12 @@ const {
 	updateTaskById,
 	deleteTaskById
 } = require('../controllers/taskController');
-const { protect } = require('../middleware/auth');
+const { verifyFirebaseToken } = require('../middleware/firebaseAuth');
 
 const router = express.Router();
 
-// All task routes are protected - require authentication
-router.use(protect);
+// All routes require Firebase authentication
+router.use(verifyFirebaseToken);
 
 // Get all tasks for the authenticated user
 router.get('/user', getUserTasks);
