@@ -76,9 +76,14 @@ exports.verifyFirebaseToken = async (req, res, next) => {
 
     const { uid, email, name, picture } = decodedToken;
 
-    // Check if user exists in our database
-    console.log('Looking for user with firebaseUid:', uid);
-    let user = await User.findOne({ firebaseUid: uid });
+    // Check if user exists in our database by firebaseUid OR email
+    console.log('Looking for user with firebaseUid:', uid, 'or email:', email);
+    let user = await User.findOne({ 
+      $or: [
+        { firebaseUid: uid },
+        { email: email }
+      ]
+    });
 
     if (!user) {
       console.log('User not found in database, creating new user');
@@ -94,6 +99,21 @@ exports.verifyFirebaseToken = async (req, res, next) => {
       console.log('New user created with ID:', user._id);
     } else {
       console.log('User found in database, ID:', user._id);
+      
+      // If user exists but with different firebaseUid, update it
+      if (user.firebaseUid !== uid) {
+        console.log('Updating existing user with new firebaseUid');
+        user.firebaseUid = uid;
+      }
+      
+      // Update other fields if they've changed
+      if (name && user.name !== name) {
+        user.name = name;
+      }
+      if (picture && user.profilePicture !== picture) {
+        user.profilePicture = picture;
+      }
+      
       // Update last login time
       user.lastLogin = Date.now();
       await user.save();
