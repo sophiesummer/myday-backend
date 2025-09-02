@@ -13,12 +13,18 @@ const TaskSchema = new mongoose.Schema({
 	createdAt: { type: Number, default: () => Date.now() },
 	startTime: { type: Number, default: () => Date.now() },
 	endTime: { type: Number },
+	completeTime: { type: Number },
 	priority: { type: Number, default: 1 },
 	recursion: { type: RecursionSchema, default: null },
-	userId: { 
-		type: mongoose.Schema.Types.ObjectId, 
+	userId: {
+		type: mongoose.Schema.Types.ObjectId,
 		ref: 'User',
 		required: true
+	},
+	goalId: {
+		type: mongoose.Schema.Types.ObjectId,
+		ref: 'Goal',
+		required: false
 	},
 	note: { type: String },
 	isBacklog: { type: Boolean, default: false },
