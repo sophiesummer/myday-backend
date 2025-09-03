@@ -26,6 +26,11 @@ const TaskSchema = new mongoose.Schema({
 		ref: 'Goal',
 		required: false
 	},
+	tagId: {
+		type: mongoose.Schema.Types.ObjectId,
+		ref: 'Tag',
+		required: false
+	},
 	note: { type: String },
 	isBacklog: { type: Boolean, default: false },
 	skipped: { type: Boolean, default: false },
