@@ -1,21 +1,21 @@
 const mongoose = require('mongoose');
-
-const RecursionSchema = new mongoose.Schema({
-	frequency: { type: String, enum: ['daily', 'weekly', 'monthly', 'yearly'], required: true }, // Recurrence frequency
-	interval: { type: Number, default: 1 }, // Interval between recurrences
-	endDate: { type: Number }, // When the recurrence should stop (timestamp)
-});
+const { RecursionSchema, DayOfWeek } = require('./recursion');
 
 const TaskSchema = new mongoose.Schema({
 	title: { type: String, required: true },
 	description: { type: String },
-	status: { type: String, enum: ['todo', 'in progress', 'pending', 'done'], default: 'todo' },
+	status: { type: String, enum: ['todo', 'in progress', 'pending', 'done', 'closed'], default: 'todo' },
 	createdAt: { type: Number, default: () => Date.now() },
 	startTime: { type: Number, default: () => Date.now() },
 	endTime: { type: Number },
 	completeTime: { type: Number },
 	priority: { type: Number, default: 1 },
-	recursion: { type: RecursionSchema, default: null },
+	type: { type: String, enum: ['task', 'holiday', 'birthday', 'events', 'reminder'], default: 'task' },
+	recurrenceId: {
+		type: mongoose.Schema.Types.ObjectId,
+		ref: 'Recursion',
+		required: false
+	},
 	userId: {
 		type: mongoose.Schema.Types.ObjectId,
 		ref: 'User',
