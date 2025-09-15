@@ -3,8 +3,10 @@ const mongoose = require('mongoose');
 const GoalSchema = new mongoose.Schema({
 	description: { type: String, required: true },
 	createdAt: { type: Number, default: () => Date.now() },
+	updatedAt: { type: Number, default: () => Date.now() },
 	startTime: { type: Number, default: () => Date.now() },
 	endTime: { type: Number },
+	targetDate: { type: Number },
 	completeTime: { type: Number },
 	status: { type: String, enum: ['active', 'completed', 'cancelled'], default: 'active' },
 	userId: {

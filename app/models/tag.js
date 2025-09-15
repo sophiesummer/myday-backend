@@ -9,7 +9,7 @@ const TagSchema = new mongoose.Schema({
 		ref: 'User',
 		required: true
 	},
-	color: { type: String, default: '#b9c7c6' }, // Default blue color
+	color: { type: String, default: '#b9c7c6' }, // Default blue color  // hex
 }, { timestamps: true });
 
 // Index to improve query performance for user's goals
