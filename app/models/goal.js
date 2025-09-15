@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 
 const GoalSchema = new mongoose.Schema({
+	title: { type: String, required: true },
 	description: { type: String, required: true },
 	createdAt: { type: Number, default: () => Date.now() },
 	updatedAt: { type: Number, default: () => Date.now() },

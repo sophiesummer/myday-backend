@@ -21,6 +21,11 @@ const TaskSchema = new mongoose.Schema({
 		ref: 'Recursion',
 		required: false
 	},
+	seriesId: {
+		type: mongoose.Schema.Types.ObjectId,
+		ref: 'Series',
+		required: false
+	},
 	userId: {
 		type: mongoose.Schema.Types.ObjectId,
 		ref: 'User',
@@ -47,5 +52,6 @@ const TaskSchema = new mongoose.Schema({
 
 // Index to improve query performance for user's tasks
 TaskSchema.index({ userId: 1 });
+TaskSchema.index({ seriesId: 1 });
 
 module.exports = mongoose.model('Task', TaskSchema);

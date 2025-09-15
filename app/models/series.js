@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { RecursionSchema } = require('./recursion');
 
 const SeriesSchema = new mongoose.Schema({
 	title: { type: String, required: true },

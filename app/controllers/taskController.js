@@ -1,5 +1,7 @@
 const Task = require('../models/task');
+const Series = require('../models/series');
 const { getCurrentUser } = require('../middleware/firebaseAuth');
+const { generateOccurrences } = require('../utils/recurrenceUtils');
 const mongoose = require('mongoose');
 
 // Create a new task
@@ -8,18 +10,99 @@ exports.createTask = async (req, res) => {
 		// Get the current user from context
 		const user = getCurrentUser();
 
-		// Add the authenticated user's ID to the task
-		const task = new Task({
-			...req.body,
-			userId: user._id
+		const payload = { ...req.body };
+
+		// If no recurrence provided, create a single task (existing behavior)
+		if (!payload.recurrence) {
+			const task = new Task({
+				...payload,
+				userId: user._id
+			});
+			await task.save();
+			return res.status(201).json(task);
+		}
+
+		// Recurring: create a Series and materialize tasks
+		const {
+			title,
+			description,
+			status,
+			startTime,
+			endTime,
+			dueTime,
+			priority,
+			type,
+			recurrence,
+			goalId,
+			tagId,
+			note,
+			isBacklog,
+			skipped,
+			planPeriod,
+			tag
+		} = payload;
+
+		// Create the series record
+		const series = new Series({
+			title: title || 'Untitled',
+			notes: description,
+			recurrence,
+			userId: user._id,
+			tagId
+		});
+		await series.save();
+
+		// Generate occurrences based on recurrence
+		const occurrences = generateOccurrences({
+			startTime,
+			endTime,
+			recurrence
 		});
 
-		await task.save();
-		res.status(201).json(task);
+		const baseDuration = typeof endTime === 'number' && typeof startTime === 'number' && endTime > startTime
+			? (endTime - startTime)
+			: undefined;
+
+		const tasksToInsert = occurrences.map((occurrenceStart) => {
+			const computedEndTime = baseDuration ? (occurrenceStart + baseDuration) : undefined;
+			return {
+				title,
+				description,
+				status,
+				startTime: occurrenceStart,
+				endTime: computedEndTime,
+				dueTime,
+				priority,
+				type,
+				seriesId: series._id,
+				userId: user._id,
+				goalId,
+				tagId,
+				note,
+				isBacklog,
+				skipped,
+				planPeriod,
+				tag
+			};
+		});
+
+		const createdTasks = await Task.insertMany(tasksToInsert);
+
+		// Update series metadata
+		series.metadata = series.metadata || {};
+		series.metadata.totalTasks = (series.metadata.totalTasks || 0) + createdTasks.length;
+		if (occurrences.length > 0) {
+			series.firstOccurrenceAt = Math.min(...occurrences);
+			series.lastOccurrenceAt = Math.max(...occurrences);
+		}
+		await series.save();
+
+		return res.status(201).json({ series, tasks: createdTasks });
 	} catch (error) {
 		res.status(400).json({ error: error.message });
 	}
 };
+
 
 // Get all tasks for the authenticated user
 exports.getUserTasks = async (req, res) => {

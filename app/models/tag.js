@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 
 const TagSchema = new mongoose.Schema({
-	name: { type: String, required: true },
+	title: { type: String, required: true },
 	description: { type: String, required: true },
 	createdAt: { type: Number, default: () => Date.now() },
 	userId: {
