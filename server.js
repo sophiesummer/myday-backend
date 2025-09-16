@@ -4,6 +4,8 @@ const cors = require("cors");
 const connectDB = require('./app/config/db.js');
 const taskRoutes = require('./app/routes/taskRoutes');
 const userRoutes = require('./app/routes/userRoutes');
+const tagRoutes = require('./app/routes/tagRoutes');
+const goalRoutes = require('./app/routes/goalRoutes');
 const { perMinuteRateLimit, perFifteenMinuteRateLimit, perHourRateLimit, perRouteLimit } = require('./app/middleware/rateLimiter');
 
 const app = express();
@@ -32,6 +34,9 @@ app.use(perRouteLimit);
 // API Routes
 app.use('/api/tasks', taskRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/goals', goalRoutes);
+app.use('/api/tags', tagRoutes);
+
 
 // Basic route for API health check
 app.get('/', (req, res) => {

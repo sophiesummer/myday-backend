@@ -12,6 +12,7 @@ const TaskSchema = new mongoose.Schema({
 	completeTime: { type: Number },
 	priority: { type: Number, default: 1 },
 	type: { type: String, enum: ['task', 'holiday', 'birthday', 'events', 'reminder'], default: 'task' },
+	isRecurring: { type: Boolean, default: false },
 	recurrence: {
 		type: RecursionSchema,
 		required: false

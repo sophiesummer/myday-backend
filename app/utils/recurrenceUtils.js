@@ -1,121 +1,165 @@
 // Recurrence utility functions for generating task occurrences
+const { DateTime } = require('luxon');
+const rrulePkg = require('rrule');
+const { DayOfWeek } = require('../models/recursion');
 
-function generateOccurrences({ startTime, endTime, recurrence }) {
-	// TODO: Implement occurrence generation logic
-	// This function should generate an array of timestamps based on the recurrence pattern
-	// Parameters:
-	// - startTime: base start time for the first occurrence
-	// - endTime: base end time (used to calculate duration)
-	// - recurrence: recurrence configuration object with frequency, interval, etc.
-	// Safety limits
-  const MAX_OCCURRENCES = 400;
+function generateOccurrences({ startTime, recurrence }) {
+	const MAX_OCCURRENCES = 200;
 
-  const frequency = recurrence?.frequency || 'daily';
-  const interval = Math.max(1, Number(recurrence?.interval || 1));
-  const startMs = normalizeStart({ startTime, recurrence });
-  const endBy = typeof recurrence?.endDate === 'number' ? recurrence.endDate : undefined;
-  const countLimit = typeof recurrence?.count === 'number' && recurrence.count > 0 ? recurrence.count : undefined;
+	if (recurrence.frequency === 'yearly') {
+		return generateYearlyOccurrences({ startTime, recurrence });
+	}
 
-  const results = [];
-  let current = startMs;
+	const { RRule } = rrulePkg;
 
-  while (true) {
-    if (countLimit && results.length >= countLimit) break;
-    if (endBy && current > endBy) break;
-    if (results.length >= MAX_OCCURRENCES) break;
+	const localizedStartTime = convertLocalTimeInUTC(startTime, recurrence.timezone);
 
-    // Align for weekly/dayOfWeek if provided only on the first iteration
-    if (results.length === 0 && frequency === 'weekly' && typeof recurrence?.dayOfWeek === 'number') {
-      current = alignToDayOfWeek(current, recurrence.dayOfWeek);
-    }
+	const frequencyMap = {
+		['daily']: RRule.DAILY,
+		['weekly']: RRule.WEEKLY,
+		['monthly']: RRule.MONTHLY,
+	};
 
-    // Align for monthly if specific day provided
-    if (results.length === 0 && frequency === 'monthly') {
-      if (typeof recurrence?.dayOfMonth === 'number') {
-        current = setDayOfMonth(current, recurrence.dayOfMonth);
-      }
-    }
+	const ruleOptions = {
+		freq: frequencyMap[recurrence.frequency],
+		interval: recurrence.interval || 1,
+		dtstart: localizedStartTime,
+		count: Math.min(MAX_OCCURRENCES, recurrence.count || 1),
+	};
 
-    results.push(current);
+	const weekdayMap = {
+		[DayOfWeek.SUNDAY]: RRule.SU,
+		[DayOfWeek.MONDAY]: RRule.MO,
+		[DayOfWeek.TUESDAY]: RRule.TU,
+		[DayOfWeek.WEDNESDAY]: RRule.WE,
+		[DayOfWeek.THURSDAY]: RRule.TH,
+		[DayOfWeek.FRIDAY]: RRule.FR,
+		[DayOfWeek.SATURDAY]: RRule.SA,
+	};
 
-    // Advance
-    if (frequency === 'daily') {
-      current = addDays(current, interval);
-    } else if (frequency === 'weekly') {
-      current = addDays(current, 7 * interval);
-    } else if (frequency === 'monthly') {
-      current = addMonthsPreserveDay(current, interval, recurrence?.dayOfMonth);
-    } else if (frequency === 'yearly') {
-      current = addYearsPreserveDay(current, interval);
-    } else {
-      // Fallback to daily
-      current = addDays(current, interval);
-    }
-  }
+	if (recurrence.frequency === 'weekly' && recurrence.daysOfWeek) {
+		ruleOptions.byweekday = recurrence.daysOfWeek.map((day) => weekdayMap[day]);
+	}
 
-  return results;
+	if (recurrence.frequency === 'MONTHLY') {
+		if (recurrence.weekAndDayOfMonth) {
+			// Example: first Monday on every month
+			const { weekOfMonth, dayOfWeek } = recurrence.weekAndDayOfMonth;
+			ruleOptions.byweekday = [weekdayMap[dayOfWeek].nth(weekOfMonth)];
+		} else if (recurrence.dayOfMonth) {
+			ruleOptions.bymonthday = [recurrence.dayOfMonth];
+		}
+	}
+
+	const rule = new RRule(ruleOptions);
+	const dates = rule.all();
+
+	const listOfTimestamps = dates.map((date) => {
+		return convertUTCDateToLocalTime(date, recurrence.timezone);
+	});
+
+	return listOfTimestamps;
 }
 
-function normalizeStart({ startTime, recurrence }) {
-	if (typeof recurrence?.startDate === 'number') return recurrence.startDate;
-	if (typeof startTime === 'number') return startTime;
-	return Date.now();
+function convertLocalTimeInUTC(dateTime, timezone) {
+	const localDate = DateTime.fromMillis(dateTime, { zone: timezone });
+	// Create a new UTC DateTime object with the same local time components as the local DateTime
+	const utcDate = DateTime.utc(localDate.year, localDate.month, localDate.day, localDate.hour, localDate.minute, localDate.second);
+	return utcDate.toJSDate();
 }
 
-function addDays(ts, days) {
-	return ts + days * 24 * 60 * 60 * 1000;
+function convertUTCDateToLocalTime(dateTime, timezone) {
+	const utcDateTime = DateTime.fromMillis(dateTime, { zone: 'UTC' });
+	const localDateTime = DateTime.fromObject(
+		{ year: utcDateTime.year, month: utcDateTime.month, day: utcDateTime.day, hour: utcDateTime.hour, minute: utcDateTime.minute, second: utcDateTime.second },
+		{ zone: timezone },
+	);
+	return localDateTime.toMillis();
 }
 
-function alignToDayOfWeek(ts, targetDow) {
-	const d = new Date(ts);
-	const currentDow = d.getUTCDay();
-	let diff = targetDow - currentDow;
-	if (diff < 0) diff += 7;
-	return addDays(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()), diff);
-}
-
-function setDayOfMonth(ts, day) {
-	const d = new Date(ts);
-	const y = d.getUTCFullYear();
-	const m = d.getUTCMonth();
-	const maxDay = daysInMonthUtc(y, m);
-	const clamped = Math.min(Math.max(1, day), maxDay);
-	return Date.UTC(y, m, clamped, d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds(), d.getUTCMilliseconds());
-}
-
-function addMonthsPreserveDay(ts, monthsToAdd, desiredDay) {
-	const d = new Date(ts);
-	let y = d.getUTCFullYear();
-	let m = d.getUTCMonth() + monthsToAdd;
-	y += Math.floor(m / 12);
-	m = ((m % 12) + 12) % 12;
-	const day = typeof desiredDay === 'number' ? desiredDay : d.getUTCDate();
-	const maxDay = daysInMonthUtc(y, m);
-	const clamped = Math.min(Math.max(1, day), maxDay);
-	return Date.UTC(y, m, clamped, d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds(), d.getUTCMilliseconds());
-}
-
-function addYearsPreserveDay(ts, yearsToAdd) {
-	const d = new Date(ts);
-	const y = d.getUTCFullYear() + yearsToAdd;
-	const m = d.getUTCMonth();
-	const day = d.getUTCDate();
-	const maxDay = daysInMonthUtc(y, m);
-	const clamped = Math.min(day, maxDay);
-	return Date.UTC(y, m, clamped, d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds(), d.getUTCMilliseconds());
-}
-
-function daysInMonthUtc(year, monthZeroBased) {
-	return new Date(Date.UTC(year, monthZeroBased + 1, 0)).getUTCDate();
+function generateYearlyOccurrences({ startTime, recurrence }) {
+	if (recurrence.frequency === 'yearly') {
+		// generate occurrences for yearly recurrence with timezone support
+		const occurrences = [];
+		const timezone = recurrence.timezone || 'UTC';
+		
+		// Convert startTime to DateTime in the specified timezone
+		const startDateTime = DateTime.fromMillis(startTime).setZone(timezone);
+		
+		// Use dayOfYear and monthOfYear from recurrence, or fall back to startDateTime values
+		const dayOfYear = startDateTime.day;
+		const monthOfYear = startDateTime.month;
+		
+		if (recurrence.count) {
+			// Generate occurrences based on count
+			const countLimit = typeof recurrence?.count === 'number' && recurrence.count > 0 && recurrence.count <= 200 ? recurrence.count : 200;
+			for (let i = 0; i < countLimit; i++) {
+				const occurrence = DateTime.fromObject({
+					year: startDateTime.year + i,
+					month: monthOfYear,
+					day: dayOfYear,
+					hour: startDateTime.hour,
+					minute: startDateTime.minute,
+					second: startDateTime.second,
+					millisecond: startDateTime.millisecond
+				}, { zone: timezone });
+				
+				// Handle invalid dates (e.g., Feb 29 on non-leap years)
+				if (occurrence.isValid) {
+					occurrences.push(occurrence.toMillis());
+				}
+			}
+		} else if (recurrence.endDate) {
+			// Generate occurrences until endDate
+			const endDateTime = DateTime.fromMillis(recurrence.endDate).setZone(timezone);
+			let currentYear = startDateTime.year;
+			
+			while (currentYear <= endDateTime.year) {
+				const occurrence = DateTime.fromObject({
+					year: currentYear,
+					month: monthOfYear,
+					day: dayOfYear,
+					hour: startDateTime.hour,
+					minute: startDateTime.minute,
+					second: startDateTime.second,
+					millisecond: startDateTime.millisecond
+				}, { zone: timezone });
+				
+				// Handle invalid dates and check if within end date
+				if (occurrence.isValid && occurrence <= endDateTime) {
+					occurrences.push(occurrence.toMillis());
+				}
+				
+				// Break if we've exceeded the end date
+				if (occurrence > endDateTime) {
+					break;
+				}
+				
+				currentYear += recurrence.interval || 1;
+			}
+		} else {
+			// Default to single occurrence if neither count nor endDate is specified
+			const occurrence = DateTime.fromObject({
+				year: startDateTime.year,
+				month: monthOfYear,
+				day: dayOfYear,
+				hour: startDateTime.hour,
+				minute: startDateTime.minute,
+				second: startDateTime.second,
+				millisecond: startDateTime.millisecond
+			}, { zone: timezone });
+			
+			if (occurrence.isValid) {
+				occurrences.push(occurrence.toMillis());
+			}
+		}
+		return occurrences;
+	}
 }
 
 module.exports = {
 	generateOccurrences,
-	normalizeStart,
-	addDays,
-	alignToDayOfWeek,
-	setDayOfMonth,
-	addMonthsPreserveDay,
-	addYearsPreserveDay,
-	daysInMonthUtc
+	generateYearlyOccurrences,
+	convertLocalTimeInUTC,
+	convertUTCDateToLocalTime
 };

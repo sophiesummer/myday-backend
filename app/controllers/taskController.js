@@ -13,7 +13,7 @@ exports.createTask = async (req, res) => {
 		const payload = { ...req.body };
 
 		// If no recurrence provided, create a single task (existing behavior)
-		if (!payload.recurrence) {
+		if (!payload.isRecurring) {
 			const task = new Task({
 				...payload,
 				userId: user._id
@@ -44,7 +44,7 @@ exports.createTask = async (req, res) => {
 
 		// Create the series record
 		const series = new Series({
-			title: title || 'Untitled',
+			title: title || 'Untitled Series',
 			notes: description,
 			recurrence,
 			userId: user._id,
