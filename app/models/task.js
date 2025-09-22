@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const { RecursionSchema } = require('./recursion');
+const { GoalSchema } = require('./goal');
 
 const TaskSchema = new mongoose.Schema({
 	title: { type: String, required: true },
@@ -37,11 +38,11 @@ const TaskSchema = new mongoose.Schema({
 		ref: 'Goal',
 		required: false
 	},
-	tagId: {
+	tagIds: [{
 		type: mongoose.Schema.Types.ObjectId,
 		ref: 'Tag',
 		required: false
-	},
+	}],
 	note: { type: String },
 	isBacklog: { type: Boolean, default: false },
 	skipped: { type: Boolean, default: false },
@@ -54,5 +55,6 @@ const TaskSchema = new mongoose.Schema({
 // Index to improve query performance for user's tasks
 TaskSchema.index({ userId: 1 });
 TaskSchema.index({ seriesId: 1 });
+TaskSchema.index({ tagIds: 1 });
 
 module.exports = mongoose.model('Task', TaskSchema);

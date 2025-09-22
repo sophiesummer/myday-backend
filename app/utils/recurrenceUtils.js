@@ -24,8 +24,19 @@ function generateOccurrences({ startTime, recurrence }) {
 		freq: frequencyMap[recurrence.frequency],
 		interval: recurrence.interval || 1,
 		dtstart: localizedStartTime,
-		count: Math.min(MAX_OCCURRENCES, recurrence.count || 1),
 	};
+
+	// Set either count or until (endDate), with count taking priority
+	if (recurrence.count) {
+		ruleOptions.count = Math.min(MAX_OCCURRENCES, recurrence.count);
+	} else if (recurrence.endDate) {
+		// Convert endDate to UTC for RRule
+		const localizedEndTime = convertLocalTimeInUTC(recurrence.endDate, recurrence.timezone);
+		ruleOptions.until = localizedEndTime;
+	} else {
+		// Default to single occurrence if neither count nor endDate is specified
+		ruleOptions.count = 1;
+	}
 
 	const weekdayMap = {
 		[DayOfWeek.SUNDAY]: RRule.SU,
