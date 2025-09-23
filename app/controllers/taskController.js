@@ -38,8 +38,7 @@ exports.createTask = async (req, res) => {
 			note,
 			isBacklog,
 			skipped,
-			planPeriod,
-			tag
+			planPeriod
 		} = payload;
 
 		// Create the series record
@@ -81,8 +80,7 @@ exports.createTask = async (req, res) => {
 				note,
 				isBacklog,
 				skipped,
-				planPeriod,
-				tag
+				planPeriod
 			};
 		});
 

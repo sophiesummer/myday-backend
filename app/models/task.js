@@ -38,16 +38,19 @@ const TaskSchema = new mongoose.Schema({
 		ref: 'Goal',
 		required: false
 	},
+	goalColor: {type: String},
+	goalTitle: {type: String},
 	tagIds: [{
 		type: mongoose.Schema.Types.ObjectId,
 		ref: 'Tag',
 		required: false
 	}],
+	tagColor: {type: String},
+	tagTitle: {type: String},
 	note: { type: String },
 	isBacklog: { type: Boolean, default: false },
 	skipped: { type: Boolean, default: false },
 	planPeriod: { type: String }, // e.g., '2025-W12' or '2025-03-23' for day
-	tag: { type: String },
 	// for internal use only
 	internalStatus: { type: String },
 }, { timestamps: true });
