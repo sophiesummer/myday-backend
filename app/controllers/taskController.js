@@ -116,7 +116,7 @@ exports.createTask = async (req, res) => {
 
 		// Create the series record
 		const series = new Series({
-			title: title || 'Untitled Series',
+			title: title || 'for recurring',
 			description,
 			recurrence,
 			userId: user._id,
@@ -172,7 +172,6 @@ exports.createTask = async (req, res) => {
 		res.status(400).json({ error: error.message });
 	}
 };
-
 
 // Get all tasks for the authenticated user
 exports.getUserTasks = async (req, res) => {
