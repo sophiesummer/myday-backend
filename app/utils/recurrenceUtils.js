@@ -71,7 +71,7 @@ function generateOccurrences({ startTime, recurrence }) {
 	const dates = rule.all();
 
 	const listOfTimestamps = dates.map((date) => {
-		return convertUTCDateToLocalTime(date, recurrence.timezone);
+		return convertUTCDateToLocalTime(date.getTime(), recurrence.timezone);
 	});
 
 	return listOfTimestamps;
