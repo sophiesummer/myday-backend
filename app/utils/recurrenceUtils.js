@@ -6,6 +6,11 @@ const { DayOfWeek } = require('../models/recursion');
 function generateOccurrences({ startTime, recurrence }) {
 	const MAX_OCCURRENCES = 200;
 
+	// Validate required timezone field
+	if (!recurrence.timezone) {
+		throw new Error('Timezone is required for recurrence patterns');
+	}
+
 	if (recurrence.frequency === 'yearly') {
 		return generateYearlyOccurrences({ startTime, recurrence });
 	}
@@ -52,7 +57,7 @@ function generateOccurrences({ startTime, recurrence }) {
 		ruleOptions.byweekday = recurrence.daysOfWeek.map((day) => weekdayMap[day]);
 	}
 
-	if (recurrence.frequency === 'MONTHLY') {
+	if (recurrence.frequency === 'monthly') {
 		if (recurrence.weekAndDayOfMonth) {
 			// Example: first Monday on every month
 			const { weekOfMonth, dayOfWeek } = recurrence.weekAndDayOfMonth;

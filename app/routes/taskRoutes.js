@@ -5,7 +5,8 @@ const {
 	queryTasks,
 	getTaskById,
 	updateTaskById,
-	deleteTaskById
+	deleteTaskById,
+	getTaskSeries
 } = require('../controllers/taskController');
 const { verifyFirebaseToken } = require('../middleware/firebaseAuth');
 
@@ -22,6 +23,9 @@ router.get('/', queryTasks);
 
 // Get a specific task by ID (only if owned by authenticated user)
 router.get('/:id', getTaskById);
+
+// Get series information for a task (only if owned by authenticated user)
+router.get('/:id/series', getTaskSeries);
 
 // Create a new task (automatically assigned to authenticated user)
 router.post('/', createTask);

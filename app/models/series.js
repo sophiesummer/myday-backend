@@ -3,39 +3,48 @@ const { RecursionSchema } = require('./recursion');
 
 const SeriesSchema = new mongoose.Schema({
 	title: { type: String, required: true },
-	notes: { type: String },
-	createdAt: { type: Number, default: () => Date.now() },
+	description: { type: String }, // Changed from 'notes' to match Task schema
+	
+	// User and relationships
 	userId: {
 		type: mongoose.Schema.Types.ObjectId,
 		ref: 'User',
 		required: true
 	},
-	tagId: {
+	goalId: {
+		type: mongoose.Schema.Types.ObjectId,
+		ref: 'Goal',
+		required: false
+	},
+	tagIds: [{
 		type: mongoose.Schema.Types.ObjectId,
 		ref: 'Tag',
 		required: false
-	},
-	// Recurrence; null => single task series (will have a single occurrence)
+	}],
+	
+	// Recurrence pattern
 	recurrence: {
 		type: RecursionSchema,
-		required: false
+		required: true // Required for series as they define recurring patterns
 	},
 
-	// Windowing control for materialization
+	// Occurrence tracking
 	firstOccurrenceAt: { type: Number },
 	lastOccurrenceAt: { type: Number },
 
-	// For “this and following” splits
-	parentSeriesId: { type: String },
+	// Series splitting support for "this and following" operations
+	parentSeriesId: { 
+		type: mongoose.Schema.Types.ObjectId,
+		ref: 'Series',
+		required: false
+	},
 	splitFromOccurrenceOn: { type: Number },
 
-	color: { type: String, default: '#8B5CF6' }, // Default purple color
+	// Metadata
+	color: { type: String, default: '#8B5CF6' },
 	active: { type: Boolean, default: true },
-	// Series metadata
-	metadata: {
-		totalTasks: { type: Number, default: 0 },
-		completedTasks: { type: Number, default: 0 }
-	}
+	priority: { type: Number, default: 1 },
+
 }, { timestamps: true });
 
 // Index to improve query performance for user's series
