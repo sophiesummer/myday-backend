@@ -7,6 +7,7 @@ const userRoutes = require('./app/routes/userRoutes');
 const tagRoutes = require('./app/routes/tagRoutes');
 const goalRoutes = require('./app/routes/goalRoutes');
 const { perMinuteRateLimit, perFifteenMinuteRateLimit, perHourRateLimit, perRouteLimit } = require('./app/middleware/rateLimiter');
+const seriesRoutes = require('./app/routes/seriesRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -36,6 +37,7 @@ app.use('/api/tasks', taskRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/goals', goalRoutes);
 app.use('/api/tags', tagRoutes);
+app.use('/api/series', seriesRoutes);
 
 
 // Basic route for API health check
