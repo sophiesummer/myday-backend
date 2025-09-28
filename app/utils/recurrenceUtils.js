@@ -173,9 +173,82 @@ function generateYearlyOccurrences({ startTime, recurrence }) {
 	}
 }
 
+/**
+ * Deeply compares two recurrence objects to determine if they are identical
+ * @param {Object} recurrence1 - First recurrence object to compare
+ * @param {Object} recurrence2 - Second recurrence object to compare
+ * @returns {boolean} - True if both recurrence objects are identical, false otherwise
+ */
+function compareTwoRecurrence(recurrence1, recurrence2) {
+	// Handle null/undefined cases
+	if (recurrence1 === recurrence2) return true;
+	if (!recurrence1 || !recurrence2) return false;
+	
+	// Compare primitive properties
+	const primitiveProps = ['frequency', 'interval', 'endDate', 'count', 'dayOfMonth', 'timezone'];
+	for (const prop of primitiveProps) {
+		if (recurrence1[prop] !== recurrence2[prop]) {
+			return false;
+		}
+	}
+	
+	// Compare daysOfWeek array
+	if (!compareArrays(recurrence1.daysOfWeek, recurrence2.daysOfWeek)) {
+		return false;
+	}
+	
+	// Compare weekAndDayOfMonth object
+	if (!compareWeekAndDayOfMonth(recurrence1.weekAndDayOfMonth, recurrence2.weekAndDayOfMonth)) {
+		return false;
+	}
+	
+	return true;
+}
+
+/**
+ * Helper function to compare two arrays for deep equality
+ * @param {Array} arr1 - First array to compare
+ * @param {Array} arr2 - Second array to compare
+ * @returns {boolean} - True if arrays are identical, false otherwise
+ */
+function compareArrays(arr1, arr2) {
+	// Handle null/undefined cases
+	if (arr1 === arr2) return true;
+	if (!arr1 || !arr2) return arr1 === arr2;
+	
+	// Check length
+	if (arr1.length !== arr2.length) return false;
+	
+	// Sort both arrays to handle different ordering
+	const sorted1 = [...arr1].sort();
+	const sorted2 = [...arr2].sort();
+	
+	// Compare each element
+	for (let i = 0; i < sorted1.length; i++) {
+		if (sorted1[i] !== sorted2[i]) {
+			return false;
+		}
+	}
+	
+	return true;
+}
+
+/**
+ * Helper function to compare weekAndDayOfMonth objects
+ * @param {Object} obj1 - First weekAndDayOfMonth object to compare
+ * @param {Object} obj2 - Second weekAndDayOfMonth object to compare
+ * @returns {boolean} - True if objects are identical, false otherwise
+ */
+function compareWeekAndDayOfMonth(obj1, obj2) {
+	// Handle null/undefined cases
+	if (obj1 === obj2) return true;
+	if (!obj1 || !obj2) return obj1 === obj2;
+	
+	// Compare dayOfWeek and weekOfMonth properties
+	return obj1.dayOfWeek === obj2.dayOfWeek && obj1.weekOfMonth === obj2.weekOfMonth;
+}
+
 module.exports = {
 	generateOccurrences,
-	generateYearlyOccurrences,
-	convertLocalTimeInUTC,
-	convertUTCDateToLocalTime
+	compareTwoRecurrence
 };

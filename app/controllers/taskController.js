@@ -1,7 +1,4 @@
 /**
- * Task Controller with Recurring Task Support
- * 
- * This controller handles both single and recurring tasks with the following features:
  * 
  * CREATE TASK:
  * - Single tasks: Create one task without recurrence
@@ -11,6 +8,8 @@
  * - 'single' mode: Update only the specific task instance
  * - 'all' mode: Update all tasks in the recurring series
  * - 'following' mode: Split the series and update this task and all following occurrences
+ * - Converting to recurring: If a non-recurring task receives a recurrence object, 
+ *   it will be converted to a recurring series regardless of update mode
  * 
  * DELETE TASK:
  * - 'single' mode: Delete only the specific task instance
@@ -47,6 +46,17 @@
  * 
  * Delete all tasks in series:
  * DELETE /tasks/:id?deleteMode=all
+ * 
+ * Convert non-recurring task to recurring:
+ * PUT /tasks/:id
+ * {
+ *   "title": "Updated Task",
+ *   "recurrence": {
+ *     "frequency": "weekly",
+ *     "interval": 1,
+ *     "count": 10
+ *   }
+ * }
  */
 
 const Task = require('../models/task');
@@ -54,26 +64,6 @@ const Series = require('../models/series');
 const { getCurrentUser } = require('../middleware/firebaseAuth');
 const { generateOccurrences } = require('../utils/recurrenceUtils');
 const mongoose = require('mongoose');
-
-// Helper function to create tasks from series
-const createTasksFromSeries = async (series, taskTemplate, occurrences) => {
-	const baseDuration = typeof taskTemplate.endTime === 'number' && typeof taskTemplate.startTime === 'number' && taskTemplate.endTime > taskTemplate.startTime
-		? (taskTemplate.endTime - taskTemplate.startTime)
-		: undefined;
-
-	const tasksToInsert = occurrences.map((occurrenceStart) => {
-		const computedEndTime = baseDuration ? (occurrenceStart + baseDuration) : taskTemplate.endTime;
-		return {
-			...taskTemplate,
-			startTime: occurrenceStart,
-			endTime: computedEndTime,
-			seriesId: series._id,
-			isRecurring: true
-		};
-	});
-
-	return await Task.insertMany(tasksToInsert);
-};
 
 // Create a new task
 exports.createTask = async (req, res) => {
@@ -107,7 +97,6 @@ exports.createTask = async (req, res) => {
 			recurrence,
 			goalId,
 			tagIds,
-			tagId, // for backward compatibility
 			note,
 			isBacklog,
 			skipped,
@@ -121,7 +110,7 @@ exports.createTask = async (req, res) => {
 			recurrence,
 			userId: user._id,
 			goalId,
-			tagIds: tagIds || (tagId ? [tagId] : []),
+			tagIds: tagIds,
 			priority: priority || 1,
 			color: '#8B5CF6'
 		});
@@ -145,7 +134,7 @@ exports.createTask = async (req, res) => {
 			type: type || 'task',
 			userId: user._id,
 			goalId,
-			tagIds: tagIds || (tagId ? [tagId] : []),
+			tagIds: tagIds,
 			note,
 			isBacklog: isBacklog || false,
 			skipped: skipped || false,
@@ -172,6 +161,7 @@ exports.createTask = async (req, res) => {
 		res.status(400).json({ error: error.message });
 	}
 };
+
 
 // Get all tasks for the authenticated user
 exports.getUserTasks = async (req, res) => {
@@ -229,216 +219,6 @@ exports.getTaskById = async (req, res) => {
 	}
 };
 
-// Helper function to split a series for "this and following" updates
-const splitSeriesFromTask = async (task, updateData, user) => {
-	const originalSeries = await Series.findById(task.seriesId);
-	if (!originalSeries) {
-		throw new Error('Original series not found');
-	}
-
-	// Create new series for "this and following" tasks
-	const newSeries = new Series({
-		title: updateData.title || originalSeries.title,
-		description: updateData.description || originalSeries.description,
-		recurrence: originalSeries.recurrence,
-		userId: user._id,
-		goalId: updateData.goalId || originalSeries.goalId,
-		tagIds: updateData.tagIds || originalSeries.tagIds || [],
-		parentSeriesId: originalSeries._id,
-		splitFromOccurrenceOn: task.startTime,
-		color: updateData.color || originalSeries.color,
-		priority: updateData.priority || originalSeries.priority
-	});
-	await newSeries.save();
-
-	// Find all tasks in the original series that start at or after the current task
-	const tasksToUpdate = await Task.find({
-		seriesId: originalSeries._id,
-		startTime: { $gte: task.startTime },
-		userId: user._id
-	}).sort({ startTime: 1 });
-
-	// Update all these tasks to belong to the new series and apply changes
-	const updatePromises = tasksToUpdate.map(async (taskToUpdate) => {
-		const taskUpdateData = {
-			...updateData,
-			seriesId: newSeries._id
-		};
-		
-		// Only preserve startTime and endTime if not explicitly provided in update
-		// This maintains the scheduling of individual occurrences
-		if (!updateData.hasOwnProperty('startTime')) {
-			delete taskUpdateData.startTime;
-		}
-		if (!updateData.hasOwnProperty('endTime')) {
-			delete taskUpdateData.endTime;
-		}
-		
-		return Task.findByIdAndUpdate(
-			taskToUpdate._id,
-			{ $set: taskUpdateData }, // Use $set for complete field overwriting
-			{ new: true, runValidators: true }
-		);
-	});
-
-	const updatedTasks = await Promise.all(updatePromises);
-
-	// Update the new series occurrence info
-	if (updatedTasks.length > 0) {
-		const startTimes = updatedTasks.map(t => t.startTime);
-		newSeries.firstOccurrenceAt = Math.min(...startTimes);
-		newSeries.lastOccurrenceAt = Math.max(...startTimes);
-		await newSeries.save();
-	}
-
-	return { newSeries, updatedTasks };
-};
-
-// Update a task by ID with support for recurring task update modes
-exports.updateTaskById = async (req, res) => {
-	try {
-		// Get the current user from context
-		const user = getCurrentUser();
-		
-		// Extract update mode from request body or query
-		const updateMode = req.body.updateMode || req.query.updateMode || 'single';
-		const updateData = { ...req.body };
-		delete updateData.updateMode; // Remove updateMode from actual update data
-
-		// Find the task first
-		const task = await Task.findOne({
-			_id: req.params.id,
-			userId: user._id
-		});
-
-		if (!task) {
-			return res.status(404).json({
-				message: 'Task not found or not authorized'
-			});
-		}
-
-		// Handle different update modes
-		switch (updateMode) {
-			case 'single':
-				// Update only this specific task - complete field overwriting
-				const updatedTask = await Task.findByIdAndUpdate(
-					task._id,
-					{ $set: updateData }, // Use $set for complete field overwriting
-					{
-						new: true,
-						runValidators: true
-					}
-				);
-				return res.status(200).json({
-					task: updatedTask,
-					message: 'Single task updated successfully'
-				});
-
-			case 'all':
-				// Update all tasks in the series
-				if (!task.seriesId) {
-					// If no series, treat as single task
-					const updatedTask = await Task.findByIdAndUpdate(
-						task._id,
-						{ $set: updateData }, // Use $set for complete field overwriting
-						{
-							new: true,
-							runValidators: true
-						}
-					);
-					return res.status(200).json({
-						task: updatedTask,
-						message: 'Task updated successfully'
-					});
-				}
-
-				// Update all tasks in the series
-				const seriesTasks = await Task.find({
-					seriesId: task.seriesId,
-					userId: user._id
-				});
-
-				// Prepare update data that completely overwrites specified fields
-				const updateAllPromises = seriesTasks.map(async (seriesTask) => {
-					// Create complete update object that overwrites all specified fields
-					const taskUpdateData = { ...updateData };
-					
-					// Only preserve startTime and endTime if not explicitly provided in update
-					// This maintains the scheduling of individual occurrences
-					if (!updateData.hasOwnProperty('startTime')) {
-						delete taskUpdateData.startTime;
-					}
-					if (!updateData.hasOwnProperty('endTime')) {
-						delete taskUpdateData.endTime;
-					}
-					
-					return Task.findByIdAndUpdate(
-						seriesTask._id,
-						{ $set: taskUpdateData }, // Use $set for complete field overwriting
-						{ new: true, runValidators: true }
-					);
-				});
-
-				const allUpdatedTasks = await Promise.all(updateAllPromises);
-
-				// Update the series if needed
-				if (task.seriesId && (updateData.title || updateData.description)) {
-					await Series.findByIdAndUpdate(task.seriesId, {
-						$set: {
-							title: updateData.title,
-							description: updateData.description,
-							goalId: updateData.goalId,
-							tagIds: updateData.tagIds,
-							priority: updateData.priority,
-							color: updateData.color
-						}
-					}, { omitUndefined: true }); // Only update fields that are defined
-				}
-
-				return res.status(200).json({
-					tasks: allUpdatedTasks,
-					message: `Updated ${allUpdatedTasks.length} tasks in the series`
-				});
-
-			case 'following':
-				// Update this task and all following tasks in the series
-				if (!task.seriesId) {
-					// If no series, treat as single task
-					const updatedTask = await Task.findByIdAndUpdate(
-						task._id,
-						{ $set: updateData }, // Use $set for complete field overwriting
-						{
-							new: true,
-							runValidators: true
-						}
-					);
-					return res.status(200).json({
-						task: updatedTask,
-						message: 'Task updated successfully'
-					});
-				}
-
-				// Split the series and update following tasks
-				const { newSeries, updatedTasks } = await splitSeriesFromTask(task, updateData, user);
-
-				return res.status(200).json({
-					newSeries,
-					tasks: updatedTasks,
-					message: `Split series and updated ${updatedTasks.length} following tasks`
-				});
-
-			default:
-				return res.status(400).json({
-					error: 'Invalid update mode. Use "single", "all", or "following"'
-				});
-		}
-
-	} catch (error) {
-		console.error('Error updating task:', error);
-		res.status(400).json({ error: error.message });
-	}
-};
-
 // Delete a task by ID with support for recurring task delete modes
 exports.deleteTaskById = async (req, res) => {
 	try {
@@ -463,11 +243,13 @@ exports.deleteTaskById = async (req, res) => {
 		// Handle different delete modes
 		switch (deleteMode) {
 			case 'single':
+		  default: {
 				// Delete only this specific task
 				await Task.findByIdAndDelete(task._id);
 				return res.status(200).json({
 					message: 'Single task deleted successfully'
 				});
+      }
 
 			case 'all':
 				// Delete all tasks in the series
@@ -527,13 +309,7 @@ exports.deleteTaskById = async (req, res) => {
 				return res.status(200).json({
 					message: `Deleted ${deleteFollowingResult.deletedCount} following tasks`
 				});
-
-			default:
-				return res.status(400).json({
-					error: 'Invalid delete mode. Use "single", "all", or "following"'
-				});
 		}
-
 	} catch (error) {
 		console.error('Error deleting task:', error);
 		res.status(500).json({ error: error.message });
@@ -582,3 +358,36 @@ exports.getTaskSeries = async (req, res) => {
 	}
 };
 
+// Update a task by ID with support for recurring task update modes
+exports.updateTaskById = async (req, res) => {
+  try {
+    // Get the current user from context
+    const user = getCurrentUser();
+
+    // Extract update mode from request body or query
+		const updateMode = req.body.updateMode || req.query.updateMode || 'single';
+		const updateData = { ...req.body };
+		delete updateData.updateMode; // Remove updateMode from actual update data
+
+    // Find the task first
+		const task = await Task.findOne({
+			_id: req.params.id,
+			userId: user._id
+		});
+
+    if (!task) {
+			return res.status(404).json({
+				message: 'Task not found or not authorized'
+			});
+		}
+
+    // for non-recurring task
+    if (!task.seriesId) {
+      
+
+    }
+  } catch (error) {
+    console.error('Error updating task:', error);
+    res.status(500).json({ error: error.message });
+  }
+};
