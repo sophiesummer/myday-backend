@@ -62,8 +62,9 @@
 const Task = require('../models/task');
 const Series = require('../models/series');
 const { getCurrentUser } = require('../middleware/firebaseAuth');
-const { generateOccurrences } = require('../utils/recurrenceUtils');
+const { generateOccurrences, compareTwoRecurrence } = require('../utils/recurrenceUtils');
 const mongoose = require('mongoose');
+const { DateTime } = require('luxon');
 
 // Create a new task
 exports.createTask = async (req, res) => {
@@ -365,9 +366,9 @@ exports.updateTaskById = async (req, res) => {
     const user = getCurrentUser();
 
     // Extract update mode from request body or query
-		const updateMode = req.body.updateMode || req.query.updateMode || 'single';
-		const updateData = { ...req.body };
-		delete updateData.updateMode; // Remove updateMode from actual update data
+		let updateMode = req.body.updateMode || req.query.updateMode || 'single';
+		const payload = { ...req.body };
+		delete payload.updateMode; // Remove updateMode from actual update data
 
     // Find the task first
 		const task = await Task.findOne({
@@ -381,13 +382,375 @@ exports.updateTaskById = async (req, res) => {
 			});
 		}
 
-    // for non-recurring task
+     // CASE 1: Non-recurring task
     if (!task.seriesId) {
-      
+      // Check if the update contains recurrence - convert to recurring series
+      if (payload.recurrence) {
+        // Convert non-recurring task to recurring series
+        const {
+          title,
+          description,
+          status,
+          startTime,
+          endTime,
+          dueTime,
+          priority,
+          type,
+          recurrence,
+          goalId,
+          tagIds,
+          note,
+          isBacklog,
+          skipped,
+          planPeriod,
+        } = { ...task.toObject(), ...payload };
 
+        // Create the series record
+        const series = new Series({
+          title: title || 'Recurring series',
+          description,
+          recurrence,
+          userId: user._id,
+          goalId,
+          tagIds: tagIds || [],
+          priority: priority || 1,
+          color: '#8B5CF6'
+        });
+        await series.save();
+
+        // Generate occurrences based on recurrence
+        const occurrences = generateOccurrences({
+          startTime: startTime || task.startTime,
+          recurrence
+        });
+
+        // Create task template
+        const taskTemplate = {
+          title,
+          description,
+          status: status || task.status,
+          startTime: startTime || task.startTime,
+          endTime,
+          dueTime,
+          priority: priority || task.priority,
+          type: type || task.type,
+          userId: user._id,
+          goalId,
+          tagIds: tagIds || task.tagIds,
+          note,
+          isBacklog: isBacklog || task.isBacklog,
+          skipped: skipped || task.skipped,
+          planPeriod,
+        };
+
+        // Delete the original non-recurring task
+        await Task.findByIdAndDelete(task._id);
+
+        // Create all tasks for the series
+        const createdTasks = await createTasksFromSeries(series, taskTemplate, occurrences);
+        
+        // Update series with occurrence info
+        if (occurrences.length > 0) {
+          series.firstOccurrenceAt = Math.min(...occurrences);
+          series.lastOccurrenceAt = Math.max(...occurrences);
+          await series.save();
+        }
+
+        return res.status(200).json({ 
+          series, 
+          tasks: createdTasks,
+          message: `Converted to recurring series with ${createdTasks.length} tasks`
+        });
+      } else {
+        // Simple update - no recurrence, just update the single task
+        const updatedTask = await Task.findByIdAndUpdate(
+          task._id,
+          payload,
+          { new: true, runValidators: true }
+        );
+
+        return res.status(200).json({
+          task: updatedTask,
+          message: 'Task updated successfully'
+        });
+      }
+    }
+
+     // CASE 2: Recurring task
+		const series = await Series.findById(task.seriesId);
+		if (!series) {
+			return res.status(404).json({ message: 'Series not found' });
+		}
+ 
+		switch (updateMode) {
+			case 'single':
+			default: {
+				// Update only this specific task, no changes to series or other tasks
+				const singleTaskUpdateData = { ...payload };
+				delete singleTaskUpdateData.recurrence;
+				
+				const updatedTask = await Task.findByIdAndUpdate(
+					task._id,
+					singleTaskUpdateData,
+					{ new: true, runValidators: true }
+				);
+
+				return res.status(200).json({
+					task: updatedTask,
+					message: 'Single recurring task updated successfully'
+				});
+			}
+
+			case 'all': {
+				const recurrenceChanged = payload.recurrence && !compareTwoRecurrence(payload.recurrence, series.recurrence);
+				const timeChanged = (payload.startTime && payload.startTime !== task.startTime) ||
+										(payload.endTime && payload.endTime !== task.endTime);
+
+				if (recurrenceChanged || timeChanged) {
+					// Create a brand new series based on payload's recurrence, starting from old series first occurrence
+					let firstStart = series.firstOccurrenceAt;
+					if (!firstStart) {
+						const firstTask = await Task.findOne({ seriesId: series._id, userId: user._id }).sort({ startTime: 1 });
+						firstStart = firstTask ? firstTask.startTime : task.startTime;
+					}
+					const newRecurrence = payload.recurrence || series.recurrence;
+
+					const merged = { ...series.toObject(), ...payload };
+					const newSeries = new Series({
+						title: merged.title || 'Recurring series',
+						description: merged.description,
+						recurrence: newRecurrence,
+						userId: user._id,
+						goalId: merged.goalId,
+						tagIds: merged.tagIds || [],
+						priority: merged.priority || 1,
+						color: series.color || '#8B5CF6'
+					});
+					await newSeries.save();
+
+					const occurrences = generateOccurrences({
+					// Align startTime to use the date from firstStart and time from payload.startTime in recurrence timezone
+					startTime: (() => {
+						const tz = newRecurrence && newRecurrence.timezone;
+						if (!tz || !payload.startTime) return firstStart;
+						const dateInTz = DateTime.fromMillis(firstStart, { zone: tz });
+						const timeInTz = DateTime.fromMillis(payload.startTime, { zone: tz });
+						const merged = DateTime.fromObject({
+							year: dateInTz.year,
+							month: dateInTz.month,
+							day: dateInTz.day,
+							hour: timeInTz.hour,
+							minute: timeInTz.minute,
+							second: timeInTz.second,
+							millisecond: timeInTz.millisecond,
+						}, { zone: tz });
+						return merged.toMillis();
+					})(),
+						recurrence: newRecurrence
+					});
+
+					const baseDuration = (payload.endTime && payload.startTime) ? (payload.endTime - payload.startTime) : 0;
+					const taskTemplate = {
+						title: merged.title,
+						description: merged.description,
+						status: merged.status || 'todo',
+						startTime: firstStart,
+						endTime: firstStart + baseDuration,
+						priority: merged.priority || 1,
+						type: merged.type || 'task',
+						userId: user._id,
+						goalId: merged.goalId,
+						tagIds: merged.tagIds || [],
+						note: merged.note,
+						isBacklog: merged.isBacklog || false,
+						skipped: merged.skipped || false,
+						planPeriod: merged.planPeriod
+					};
+
+					const newTasks = await createTasksFromSeries(newSeries, taskTemplate, occurrences);
+
+					if (occurrences.length > 0) {
+						newSeries.firstOccurrenceAt = Math.min(...occurrences);
+						newSeries.lastOccurrenceAt = Math.max(...occurrences);
+						await newSeries.save();
+					}
+
+					// Clean up old series and tasks
+					await Task.deleteMany({ seriesId: series._id, userId: user._id });
+					await Series.findByIdAndDelete(series._id);
+
+					return res.status(200).json({
+						message: `Recurrence changed. Created new series with ${newTasks.length} tasks and deleted old series`
+					});
+				}
+
+				// bulk update other fields
+				await bulkUpdateOtherFieldsInTasksInSeries(user._id, series._id, payload);
+				return res.status(200).json({ message: 'Updated all recurring tasks in series' });
+			}
+
+			case 'following': {
+				const recurrenceChanged = payload.recurrence && !compareTwoRecurrence(payload.recurrence, series.recurrence);
+				const timeChanged = (payload.startTime && payload.startTime !== task.startTime) ||
+											(payload.endTime && payload.endTime !== task.endTime);
+
+				// Prepare fields to apply to tasks (exclude scheduling fields)
+				const fieldsToApply = { ...payload };
+				delete fieldsToApply.recurrence;
+				delete fieldsToApply.startTime;
+				delete fieldsToApply.endTime;
+				delete fieldsToApply.dueTime;
+				delete fieldsToApply.completeTime;
+
+				if (recurrenceChanged || timeChanged) {
+					// Start a new series for this and following occurrences
+					const newRecurrence = payload.recurrence || series.recurrence;
+					const merged = { ...series.toObject(), ...payload };
+					const newSeries = new Series({
+						title: merged.title || 'Recurring series',
+						description: merged.description,
+						recurrence: newRecurrence,
+						userId: user._id,
+						goalId: merged.goalId,
+						tagIds: merged.tagIds || [],
+						priority: merged.priority || 1,
+						color: series.color || '#8B5CF6'
+					});
+					await newSeries.save();
+
+					// Compute the new series start time: date from current task, time from payload.startTime (if provided) in recurrence timezone
+					const startForNew = (() => {
+						const tz = newRecurrence && newRecurrence.timezone;
+						if (!tz || !payload.startTime) return task.startTime;
+						const dateInTz = DateTime.fromMillis(task.startTime, { zone: tz });
+						const timeInTz = DateTime.fromMillis(payload.startTime, { zone: tz });
+						const mergedTs = DateTime.fromObject({
+							year: dateInTz.year,
+							month: dateInTz.month,
+							day: dateInTz.day,
+							hour: timeInTz.hour,
+							minute: timeInTz.minute,
+							second: timeInTz.second,
+							millisecond: timeInTz.millisecond,
+						}, { zone: tz });
+						return mergedTs.toMillis();
+					})();
+
+					// Determine base duration
+					const baseDuration = (payload.endTime && payload.startTime)
+						? (payload.endTime - payload.startTime)
+						: ((task.endTime && task.startTime) ? (task.endTime - task.startTime) : 0);
+
+					// Build task template for new series
+					const taskTemplate = {
+						title: merged.title,
+						description: merged.description,
+						status: merged.status || task.status || 'todo',
+						startTime: startForNew,
+						endTime: startForNew + baseDuration,
+						priority: merged.priority || task.priority || 1,
+						type: merged.type || task.type || 'task',
+						userId: user._id,
+						goalId: merged.goalId,
+						tagIds: merged.tagIds || task.tagIds || [],
+						note: merged.note,
+						isBacklog: merged.isBacklog || task.isBacklog || false,
+						skipped: merged.skipped || task.skipped || false,
+						planPeriod: merged.planPeriod
+					};
+
+					// Generate new occurrences according to newRecurrence starting from this occurrence
+					const occurrences = generateOccurrences({
+						startTime: startForNew,
+						recurrence: newRecurrence
+					});
+
+					// Delete this and following tasks from the old series
+					await Task.deleteMany({
+						seriesId: series._id,
+						userId: user._id,
+						startTime: { $gte: task.startTime }
+					});
+
+					// Create tasks for the new series
+					const newTasks = await createTasksFromSeries(newSeries, taskTemplate, occurrences);
+
+					// Update new series occurrence bounds
+					if (occurrences.length > 0) {
+						newSeries.firstOccurrenceAt = Math.min(...occurrences);
+						newSeries.lastOccurrenceAt = Math.max(...occurrences);
+						await newSeries.save();
+					}
+
+					// Update old series occurrence bounds or delete if empty
+					const remainingOld = await Task.find({ seriesId: series._id, userId: user._id }).sort({ startTime: 1 });
+					if (remainingOld.length > 0) {
+						await Series.findByIdAndUpdate(series._id, {
+							firstOccurrenceAt: remainingOld[0].startTime,
+							lastOccurrenceAt: remainingOld[remainingOld.length - 1].startTime
+						});
+					} else {
+						await Series.findByIdAndDelete(series._id);
+					}
+
+					// Apply other field updates to this-and-following tasks across series
+					if (Object.keys(fieldsToApply).length > 0) {
+						await Task.updateMany(
+							{ userId: user._id, $or: [ { seriesId: newSeries._id }, { seriesId: series._id, startTime: { $gte: task.startTime } } ] },
+							{ $set: fieldsToApply }
+						);
+					}
+
+					return res.status(200).json({ message: `Recurrence/time changed. Split series and created new series with ${newTasks.length} tasks` });
+				}
+
+				// No recurrence/time change: update other fields for this and following tasks in the existing series
+				if (Object.keys(fieldsToApply).length > 0) {
+					await Task.updateMany(
+						{ userId: user._id, seriesId: series._id, startTime: { $gte: task.startTime } },
+						{ $set: fieldsToApply }
+					);
+				}
+
+				return res.status(200).json({ message: 'Updated this and following recurring tasks in series' });
+			}
     }
   } catch (error) {
     console.error('Error updating task:', error);
     res.status(500).json({ error: error.message });
   }
 };
+
+
+const createTasksFromSeries = async (series, taskTemplate, occurrences) => {
+	const baseDuration = taskTemplate.endTime - taskTemplate.startTime;
+
+	const tasksToInsert = occurrences.map((occurrenceStart) => {
+		const computedEndTime = occurrenceStart + baseDuration;
+		return {
+			...taskTemplate,
+			startTime: occurrenceStart,
+			endTime: computedEndTime,
+			seriesId: series._id,
+			isRecurring: true
+		};
+	});
+
+	return await Task.insertMany(tasksToInsert);
+};
+
+async function bulkUpdateOtherFieldsInTasksInSeries(userId, seriesId, payload) {
+  const fieldsToApply = { ...payload };
+  delete fieldsToApply.recurrence;
+  delete fieldsToApply.startTime;
+  delete fieldsToApply.endTime;
+  delete fieldsToApply.dueTime;
+  delete fieldsToApply.completeTime;
+
+  if (Object.keys(fieldsToApply).length === 0) return;
+
+  await Task.updateMany(
+    { userId, seriesId },
+    { $set: fieldsToApply }
+  );
+}
